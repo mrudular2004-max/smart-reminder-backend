@@ -20,17 +20,29 @@ def add_headers(response):
 app.config["JWT_SECRET_KEY"] = "super-secret-key"
 jwt = JWTManager(app)
 
-users = []
+users = [
+    {
+        "username": "admin",
+        "password": generate_password_hash("1234")
+    }
+]
 
-reminders = []
+reminders = {}   # store reminders per user
 
 @app.route("/")
+def home():
+    return jsonify({"message": "Backend Connected Successfully!"})
 # ✅ REGISTER
 @app.route("/register", methods=["POST"])
 def register():
     data = request.json
     username = data.get("username")
     password = data.get("password")
+
+    # 🔥 check duplicate username
+    for user in users:
+        if user["username"] == username:
+            return jsonify({"error": "Username already exists"}), 400
 
     hashed_password = generate_password_hash(password)
 
@@ -40,6 +52,7 @@ def register():
     })
 
     return jsonify({"message": "User Registered Successfully"})
+
 # ✅ LOGIN
 @app.route("/login", methods=["POST"])
 def login():
@@ -62,6 +75,7 @@ def home():
 @app.route("/add", methods=["POST"])
 @jwt_required()
 def add_reminder():
+    current_user = get_jwt_identity()
     data = request.json
 
     reminder = {
@@ -74,7 +88,11 @@ def add_reminder():
         "notified": False
     }
 
-    reminders.append(reminder)
+    if current_user not in reminders:
+        reminders[current_user] = []
+
+    reminders[current_user].append(reminder)
+
     return jsonify({"message": "Reminder Added Successfully!"})
 
 
@@ -82,25 +100,29 @@ def add_reminder():
 @app.route("/list", methods=["GET"])
 @jwt_required()
 def list_reminders():
-    update_recurring()
-    return jsonify(reminders)
+    current_user = get_jwt_identity()
+    update_recurring(current_user)
+    return jsonify(reminders.get(current_user, []))
 
 
 # ✅ TOGGLE STATUS
 @app.route("/toggle", methods=["POST"])
 @jwt_required()
 def toggle_status():
+    current_user = get_jwt_identity()
     data = request.json
     index = data.get("index")
 
-    if index < len(reminders):
-        if reminders[index]["status"] == "Pending":
-            reminders[index]["status"] = "Completed"
+    user_reminders = reminders.get(current_user, [])
+
+    if index < len(user_reminders):
+        if user_reminders[index]["status"] == "Pending":
+            user_reminders[index]["status"] = "Completed"
         else:
-            reminders[index]["status"] = "Pending"
+            user_reminders[index]["status"] = "Pending"
 
         return jsonify({"message": "Status Updated"})
-    
+
     return jsonify({"error": "Invalid Index"}), 400
 
 
@@ -108,21 +130,25 @@ def toggle_status():
 @app.route("/delete", methods=["POST"])
 @jwt_required()
 def delete_reminder():
+    current_user = get_jwt_identity()
     data = request.json
     index = data.get("index")
 
-    if index < len(reminders):
-        reminders.pop(index)
+    user_reminders = reminders.get(current_user, [])
+
+    if index < len(user_reminders):
+        user_reminders.pop(index)
         return jsonify({"message": "Deleted Successfully"})
-    
+
     return jsonify({"error": "Invalid Index"}), 400
 
 
 # ✅ RECURRING LOGIC
-def update_recurring():
+def update_recurring(current_user):
     now = datetime.now()
+    user_reminders = reminders.get(current_user, [])
 
-    for reminder in reminders:
+    for reminder in user_reminders:
         if reminder["status"] == "Pending":
             due = datetime.fromisoformat(reminder["dueDate"])
 
